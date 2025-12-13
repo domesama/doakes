@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"testing"
 	"time"
 
@@ -306,4 +307,55 @@ func TestServerHealthCheckTimeout(t *testing.T) {
 	// If we reach here without panic, the test passes
 	// This verifies that EnableHealthCheck() successfully stops the watcher
 	assert.True(t, srv.IsHealthCheckEnabled())
+}
+
+func TestServerGetRunningPort(t *testing.T) {
+	_ = os.Setenv("OTEL_SERVICE_NAME", "test-service")
+	_ = os.Setenv("INTERNAL_SERVER_LISTEN_ADDR", ":0") // Use port 0 to get OS-assigned port
+	_ = os.Setenv("INTERNAL_SERVER_WAIT_ENABLE_HEALTH_CHECK_DURATION", "5s")
+
+	srv, cleanUpFn, err := doakeswire.InitializeTelemetryServerWithAutoStart()
+	assert.NoError(t, err)
+	assert.NotNil(t, srv)
+	t.Cleanup(cleanUpFn)
+
+	srv.EnableHealthCheck()
+
+	// Wait for server to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Get the actual running port
+	port := srv.GetRunningPort()
+	assert.NotEqual(t, 0, port, "Running port should not be 0")
+	assert.Greater(t, port, 1024, "Port should be greater than 1024 (ephemeral port range)")
+
+	// Get the actual running address
+	addr := srv.GetRunningAddress()
+	assert.NotEmpty(t, addr, "Running address should not be empty")
+	assert.Contains(t, addr, ":", "Address should contain port separator")
+
+	// Verify we can actually connect to the port
+	resp, err := http.Get("http://localhost:" + strconv.Itoa(port) + "/_hc")
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	if resp != nil {
+		assert.Equal(t, 200, resp.StatusCode)
+		_ = resp.Body.Close()
+	}
+}
+
+func TestServerGetRunningPortBeforeStart(t *testing.T) {
+	_ = os.Setenv("OTEL_SERVICE_NAME", "test-service")
+	_ = os.Setenv("INTERNAL_SERVER_WAIT_ENABLE_HEALTH_CHECK_DURATION", "5s")
+
+	srv, err := doakeswire.InitializeTelemetryServer()
+	assert.NoError(t, err)
+	assert.NotNil(t, srv)
+
+	// Server not started yet, should return 0
+	port := srv.GetRunningPort()
+	assert.Equal(t, 0, port, "Port should be 0 before server starts")
+
+	addr := srv.GetRunningAddress()
+	assert.Empty(t, addr, "Address should be empty before server starts")
 }

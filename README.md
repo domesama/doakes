@@ -302,29 +302,26 @@ srv.RegisterHealthCheck("external-api", func() error {
 
 ### 2. Use OpenTelemetry Metrics
 
-The server automatically sets up a global meter provider:
+The server automatically sets up a global meter provider. You can create metrics in two ways:
+
+#### Option A: Use the GetMeter() Helper (Recommended)
 
 ```go
 import (
-    "go.opentelemetry.io/otel"
-    "go.opentelemetry.io/otel/metric"
+    "github.com/domesama/doakes/doakeswire"
+    "go.opentelemetry.io/otel/attribute"
 )
 
-// Get meter
-meter := otel.Meter("my-service")
+// Get meter automatically scoped to your OTEL_SERVICE_NAME
+meter := doakeswire.GetMeter()
 
 // Create counter
 requestCounter, _ := meter.Int64Counter("http_requests_total")
-requestCounter.Add(ctx, 1, metric.WithAttributes(
-    attribute.String("method", "GET"),
-    attribute.String("path", "/api/users"),
-))
+requestCounter.Add(ctx, 1, attribute.String("method", "GET"))
 
 // Create histogram
 latencyHistogram, _ := meter.Int64Histogram("http_request_duration_ms")
-latencyHistogram.Record(ctx, 150, metric.WithAttributes(
-    attribute.String("method", "POST"),
-))
+latencyHistogram.Record(ctx, 150, attribute.String("method", "POST"))
 
 // Create gauge (via observable)
 _, _ = meter.Int64ObservableGauge("active_connections",
@@ -333,6 +330,34 @@ _, _ = meter.Int64ObservableGauge("active_connections",
         return nil
     }),
 )
+```
+
+#### Option B: Use otel.Meter() Directly
+
+```go
+import (
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/metric"
+)
+
+// Get meter with custom scope name
+meter := otel.Meter("my-service")
+
+// Create counter
+requestCounter, _ := meter.Int64Counter("http_requests_total")
+requestCounter.Add(ctx, 1, metric.WithAttributes(
+    attribute.String("method", "GET"),
+    attribute.String("path", "/api/users"),
+))
+```
+
+You can also use the metrics package directly:
+
+```go
+import "github.com/domesama/doakes/metrics"
+
+// Get default meter (same as doakeswire.GetMeter())
+meter := metrics.GetDefaultMeter()
 ```
 
 ### 3. Access Available Endpoints
@@ -354,6 +379,37 @@ if srv.IsRunning() {
 if srv.IsHealthCheckEnabled() {
     log.Println("Health checks are enabled")
 }
+
+// Get the actual port when using :0 for dynamic port assignment
+port := srv.GetRunningPort()
+log.Printf("Server is running on port %d", port)
+
+// Or get the full address
+addr := srv.GetRunningAddress()
+log.Printf("Server is running at %s", addr)
+```
+
+**Using Dynamic Port Assignment:**
+
+When you want the OS to assign an available port, set the listen address to `:0`:
+
+```go
+os.Setenv("INTERNAL_SERVER_LISTEN_ADDR", ":0")
+
+srv, cleanup, err := doakeswire.InitializeTelemetryServerWithAutoStart()
+if err != nil {
+    panic(err)
+}
+defer cleanup()
+
+// Wait a bit for server to start
+time.Sleep(100 * time.Millisecond)
+
+// Get the actual port assigned by the OS
+port := srv.GetRunningPort()
+log.Printf("Telemetry server started on port %d", port)
+log.Printf("Metrics available at http://localhost:%d/metrics", port)
+```
 ```
 
 ### 5. Graceful Shutdown

@@ -7,7 +7,9 @@ import (
 	"github.com/domesama/doakes/config"
 	"github.com/domesama/doakes/server"
 	"github.com/google/wire"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 )
@@ -44,15 +46,12 @@ func ProvideMetricsConfig() config.MetricsConfig {
 }
 
 // ProvideResource creates an OpenTelemetry resource from environment variables.
-// Reads OTEL_SERVICE_NAME (or legacy APP_NAME) and OTEL_SERVICE_VERSION.
+// Reads OTEL_SERVICE_NAME and OTEL_SERVICE_VERSION.
 func ProvideResource() (*resource.Resource, error) {
 	attributes := make([]attribute.KeyValue, 0)
 
-	// Service name - prefer OTEL_SERVICE_NAME over legacy APP_NAME
+	// Service name
 	serviceName := os.Getenv("OTEL_SERVICE_NAME")
-	if serviceName == "" {
-		serviceName = os.Getenv("APP_NAME")
-	}
 	if serviceName != "" {
 		attributes = append(attributes, semconv.ServiceNameKey.String(serviceName))
 	}
@@ -117,4 +116,29 @@ func ProvideServer(opts server.Options) (*server.TelemetryServer, func(), error)
 	}
 
 	return srv, cleanup, nil
+}
+
+// GetMeter provides an OpenTelemetry Meter scoped to the service name.
+// This uses the global meter provider that was set during server initialization.
+// The meter scope name is extracted from the OTEL_SERVICE_NAME environment variable.
+// This should be called after the telemetry server has been initialized.
+//
+// Usage:
+//
+//	srv, cleanup, err := InitializeTelemetryServerWithAutoStart()
+//	// ... setup ...
+//	meter := doakeswire.GetMeter()
+//	counter, _ := meter.Int64Counter("requests_total")
+func GetMeter() metric.Meter {
+	serviceName := getServiceNameFromEnv()
+	return otel.GetMeterProvider().Meter(serviceName)
+}
+
+// getServiceNameFromEnv reads the service name from OTEL_SERVICE_NAME environment variable.
+func getServiceNameFromEnv() string {
+	serviceName := os.Getenv("OTEL_SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "unknown-service"
+	}
+	return serviceName
 }

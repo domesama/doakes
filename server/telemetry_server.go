@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/domesama/doakes/config"
@@ -160,6 +162,35 @@ func (s *TelemetryServer) IsRunning() bool {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 	return s.running
+}
+
+// GetRunningAddress returns the actual address the server is listening on.
+// This is useful when using ":0" to get the OS-assigned port.
+// Returns empty string if the server hasn't started yet.
+func (s *TelemetryServer) GetRunningAddress() string {
+	return s.httpServer.ActualAddress()
+}
+
+// GetRunningPort returns the actual port the server is listening on.
+// This is useful when using ":0" to get the OS-assigned port.
+// Returns 0 if the server hasn't started yet or if port cannot be determined.
+func (s *TelemetryServer) GetRunningPort() int {
+	addr := s.httpServer.ActualAddress()
+	if addr == "" {
+		return 0
+	}
+
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0
+	}
+
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		return 0
+	}
+
+	return portNum
 }
 
 func (s *TelemetryServer) startHealthCheckWatcher() {

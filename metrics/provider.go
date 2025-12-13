@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/domesama/doakes/config"
 	"github.com/prometheus/client_golang/prometheus"
@@ -13,17 +14,20 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
-	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
 )
 
 // Provider manages the OpenTelemetry meter provider and Prometheus exporter.
 type Provider struct {
 	registry      *prometheus.Registry
 	exporter      *otelprom.Exporter
-	meterProvider *metric.MeterProvider
+	meterProvider *sdkmetric.MeterProvider
 	httpHandler   http.Handler
 	cleanupFuncs  []func()
+	serviceName   string
 }
 
 // NewProvider creates a new metrics provider with Prometheus export.
@@ -47,11 +51,15 @@ func NewProvider(res *resource.Resource, metricsConfig config.MetricsConfig) (*P
 
 	httpHandler := createPrometheusHTTPHandler(registry)
 
+	// Extract service name from resource
+	serviceName := extractServiceName(res)
+
 	provider := &Provider{
 		registry:      registry,
 		exporter:      exporter,
 		meterProvider: meterProvider,
 		httpHandler:   httpHandler,
+		serviceName:   serviceName,
 		cleanupFuncs: []func(){
 			func() { _ = exporter.Shutdown(context.Background()) },
 			func() { _ = meterProvider.Shutdown(context.Background()) },
@@ -90,27 +98,27 @@ func createOtelPrometheusExporter(registry *prometheus.Registry) (*otelprom.Expo
 }
 
 func createMeterProvider(res *resource.Resource, exporter *otelprom.Exporter,
-	views []metric.View) *metric.MeterProvider {
+	views []sdkmetric.View) *sdkmetric.MeterProvider {
 	// Add default view for all metrics
-	defaultView := metric.NewView(
-		metric.Instrument{Name: "*"},
-		metric.Stream{Aggregation: metric.AggregationDefault{}},
+	defaultView := sdkmetric.NewView(
+		sdkmetric.Instrument{Name: "*"},
+		sdkmetric.Stream{Aggregation: sdkmetric.AggregationDefault{}},
 	)
 	views = append(views, defaultView)
 
-	return metric.NewMeterProvider(
-		metric.WithReader(exporter),
-		metric.WithView(views...),
-		metric.WithResource(res),
+	return sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(exporter),
+		sdkmetric.WithView(views...),
+		sdkmetric.WithResource(res),
 	)
 }
 
-func initializeRuntimeMetrics(meterProvider *metric.MeterProvider) error {
+func initializeRuntimeMetrics(meterProvider *sdkmetric.MeterProvider) error {
 
 	return runtime.Start(runtime.WithMeterProvider(meterProvider))
 }
 
-func setGlobalMeterProvider(meterProvider *metric.MeterProvider) {
+func setGlobalMeterProvider(meterProvider *sdkmetric.MeterProvider) {
 	otel.SetMeterProvider(meterProvider)
 }
 
@@ -138,4 +146,38 @@ func (l *promLogger) Println(values ...interface{}) {
 	}
 
 	slog.Info(fmt.Sprintf(format, values[1:]...), "module", "prometheus")
+}
+
+// GetMeter returns a Meter scoped to the service name from the provider.
+// This is a convenience method for getting a meter without manually specifying the scope.
+func (p *Provider) GetMeter() metric.Meter {
+	return otel.GetMeterProvider().Meter(p.serviceName)
+}
+
+// GetDefaultMeter returns a Meter scoped to the OTEL_SERVICE_NAME environment variable.
+// This is a package-level convenience function that can be called after the provider is initialized.
+// It uses the global meter provider set by NewProvider.
+func GetDefaultMeter() metric.Meter {
+	serviceName := getServiceNameFromEnv()
+	return otel.GetMeterProvider().Meter(serviceName)
+}
+
+// extractServiceName extracts the service name from the OpenTelemetry resource.
+// Falls back to environment variable or "unknown-service" if not found.
+func extractServiceName(res *resource.Resource) string {
+	if res != nil {
+		if value, ok := res.Set().Value(semconv.ServiceNameKey); ok {
+			return value.AsString()
+		}
+	}
+	return getServiceNameFromEnv()
+}
+
+// getServiceNameFromEnv reads the service name from OTEL_SERVICE_NAME environment variable.
+func getServiceNameFromEnv() string {
+	serviceName := os.Getenv("OTEL_SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "unknown-service"
+	}
+	return serviceName
 }

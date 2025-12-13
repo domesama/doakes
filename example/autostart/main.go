@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/domesama/doakes/doakeswire"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 func main() {
@@ -24,7 +28,27 @@ func main() {
 	// Enable health checks after initialization is complete
 	srv.EnableHealthCheck()
 
-	slog.Info("Server is running and ready")
+	// Get meter scoped to the service name from OTEL_SERVICE_NAME
+	meter := doakeswire.GetMeter()
+
+	// Create some example metrics
+	counter, _ := meter.Int64Counter("example_requests_total")
+	counter.Add(context.Background(), 1, metric.WithAttributes(attribute.String("method", "GET")))
+
+	histogram, _ := meter.Int64Histogram("example_request_duration_ms")
+	histogram.Record(context.Background(), 150, metric.WithAttributes(attribute.String("endpoint", "/api")))
+
+	// Get the actual running port (useful when using :0 for dynamic port)
+	port := srv.GetRunningPort()
+	addr := srv.GetRunningAddress()
+
+	slog.Info(
+		"Server is running and ready",
+		"port", port,
+		"address", addr,
+		"metrics_url", fmt.Sprintf("http://localhost:%d/metrics", port),
+		"health_url", fmt.Sprintf("http://localhost:%d/_hc", port),
+	)
 
 	// Wait for shutdown signal
 	waitForShutdown()

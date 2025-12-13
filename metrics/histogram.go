@@ -2,13 +2,13 @@ package metrics
 
 import (
 	"github.com/domesama/doakes/config"
-	"go.opentelemetry.io/otel/sdk/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 // CreateHistogramViews creates OpenTelemetry metric views for histogram configuration.
 // Named patterns (e.g., "*_ns") get their specific boundaries, all others use defaults.
-func CreateHistogramViews(metricsConfig config.MetricsConfig) []metric.View {
-	var views []metric.View
+func CreateHistogramViews(metricsConfig config.MetricsConfig) []sdkmetric.View {
+	var views []sdkmetric.View
 
 	namedHistogramViews := createNamedHistogramViews(metricsConfig.HistogramBoundariesByName)
 	views = append(views, namedHistogramViews...)
@@ -19,17 +19,17 @@ func CreateHistogramViews(metricsConfig config.MetricsConfig) []metric.View {
 	return views
 }
 
-func createNamedHistogramViews(boundariesByName map[string][]float64) []metric.View {
-	var views []metric.View
+func createNamedHistogramViews(boundariesByName map[string][]float64) []sdkmetric.View {
+	var views []sdkmetric.View
 
 	for metricNamePattern, boundaries := range boundariesByName {
-		view := metric.NewView(
-			metric.Instrument{
+		view := sdkmetric.NewView(
+			sdkmetric.Instrument{
 				Name: metricNamePattern,
-				Kind: metric.InstrumentKindHistogram,
+				Kind: sdkmetric.InstrumentKindHistogram,
 			},
-			metric.Stream{
-				Aggregation: metric.AggregationExplicitBucketHistogram{
+			sdkmetric.Stream{
+				Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
 					Boundaries: boundaries,
 				},
 			},
@@ -40,13 +40,13 @@ func createNamedHistogramViews(boundariesByName map[string][]float64) []metric.V
 	return views
 }
 
-func createDefaultHistogramView(boundaries []float64) metric.View {
-	return metric.NewView(
-		metric.Instrument{
-			Kind: metric.InstrumentKindHistogram,
+func createDefaultHistogramView(boundaries []float64) sdkmetric.View {
+	return sdkmetric.NewView(
+		sdkmetric.Instrument{
+			Kind: sdkmetric.InstrumentKindHistogram,
 		},
-		metric.Stream{
-			Aggregation: metric.AggregationExplicitBucketHistogram{
+		sdkmetric.Stream{
+			Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
 				Boundaries: boundaries,
 			},
 		},
